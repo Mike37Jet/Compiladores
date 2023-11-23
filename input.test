@@ -1,6 +1,6 @@
 a = 5;
-b = a + 6;
-c + 123;
-3+3;
-5+12;
+b = 3;
+c = a + b;
+"Hello Panters";
+6 / 2;
 "Hola Panteras";

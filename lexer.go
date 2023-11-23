@@ -10,12 +10,16 @@ import (
 
 type Token int
 
+var contador int
+var b int
+
 const (
 	EOF = iota
 	ILLEGAL
 	IDENT
 	INT
-	SEMI // ;
+	SEMI   // ;
+	STRING // "string"
 
 	// Infix ops
 	ADD // +
@@ -23,27 +27,35 @@ const (
 	MUL // *
 	DIV // /
 
-	ASSIGN // =
+	ASSIGN  // =
+	LPAREN  // (
+	RPAREN  // )
+	COMILLA // "
 )
 
-var tokens = []string{
+var tokens = map[Token]string{
 	EOF:     "EOF",
 	ILLEGAL: "ILLEGAL",
 	IDENT:   "IDENT",
 	INT:     "INT",
 	SEMI:    ";",
+	STRING:  "STRING",
 
-	// Infix ops
-	ADD: "+",
-	SUB: "-",
-	MUL: "*",
-	DIV: "/",
-
-	ASSIGN: "=",
+	ADD:     "+",
+	SUB:     "-",
+	MUL:     "*",
+	DIV:     "/",
+	ASSIGN:  "=",
+	LPAREN:  "(",
+	RPAREN:  ")",
+	COMILLA: "COMILLA",
 }
 
 func (t Token) String() string {
-	return tokens[t]
+	if str, ok := tokens[t]; ok {
+		return str
+	}
+	return "DESCONOCIDO"
 }
 
 type Position struct {
@@ -63,23 +75,18 @@ func NewLexer(reader io.Reader) *Lexer {
 	}
 }
 
-// Lex scans the input for the next token. It returns the position of the token,
-// the token's type, and the literal value.
 func (l *Lexer) Lex() (Position, Token, string) {
-	// keep looping until we return a token
 	for {
 		r, _, err := l.reader.ReadRune()
+
 		if err != nil {
 			if err == io.EOF {
 				return l.pos, EOF, ""
 			}
 
-			// at this point there isn't much we can do, and the compiler
-			// should just return the raw error to the user
 			panic(err)
 		}
 
-		// update the column to the position of the newly read in rune
 		l.pos.column++
 
 		switch r {
@@ -97,17 +104,36 @@ func (l *Lexer) Lex() (Position, Token, string) {
 			return l.pos, DIV, "/"
 		case '=':
 			return l.pos, ASSIGN, "="
+		case '(':
+			return l.pos, LPAREN, "("
+		case ')':
+			return l.pos, RPAREN, ")"
+		case '"':
+			if contador == 1 {
+				startPos := l.pos
+				lit := l.lexString()
+				contador = 0
+				return startPos, STRING, lit
+			}
+
+			if b == 0 {
+				contador++
+				b++
+				l.reader.UnreadRune()
+				return l.pos, COMILLA, "\""
+			}
+			b--
+			return l.pos, COMILLA, "\""
+
 		default:
 			if unicode.IsSpace(r) {
-				continue // nothing to do here, just move on
+				continue
 			} else if unicode.IsDigit(r) {
-				// backup and let lexInt rescan the beginning of the int
 				startPos := l.pos
 				l.backup()
 				lit := l.lexInt()
 				return startPos, INT, lit
 			} else if unicode.IsLetter(r) {
-				// backup and let lexIdent rescan the beginning of the ident
 				startPos := l.pos
 				l.backup()
 				lit := l.lexIdent()
@@ -115,6 +141,7 @@ func (l *Lexer) Lex() (Position, Token, string) {
 			} else {
 				return l.pos, ILLEGAL, string(r)
 			}
+
 		}
 	}
 }
@@ -125,22 +152,19 @@ func (l *Lexer) resetPosition() {
 }
 
 func (l *Lexer) backup() {
-	if err := l.reader.UnreadRune(); err != nil {
-		panic(err)
+	err := l.reader.UnreadRune()
+	if err != nil {
+		return
 	}
-
 	l.pos.column--
 }
 
-// lexInt scans the input until the end of an integer and then returns the
-// literal.
 func (l *Lexer) lexInt() string {
 	var lit string
 	for {
 		r, _, err := l.reader.ReadRune()
 		if err != nil {
 			if err == io.EOF {
-				// at the end of the int
 				return lit
 			}
 		}
@@ -149,35 +173,54 @@ func (l *Lexer) lexInt() string {
 		if unicode.IsDigit(r) {
 			lit = lit + string(r)
 		} else {
-			// scanned something not in the integer
 			l.backup()
 			return lit
 		}
 	}
 }
 
-// lexIdent scans the input until the end of an identifier and then returns the
-// literal.
 func (l *Lexer) lexIdent() string {
+
+	var lit string
+	r, _, err := l.reader.ReadRune()
+	if err != nil {
+		if err == io.EOF {
+			return lit
+		}
+		panic(err)
+	}
+
+	l.pos.column++
+	if unicode.IsLetter(r) {
+		lit = string(r)
+	}
+	return lit
+
+}
+func (l *Lexer) lexString() string {
+
 	var lit string
 	for {
 		r, _, err := l.reader.ReadRune()
 		if err != nil {
 			if err == io.EOF {
-				// at the end of the identifier
 				return lit
 			}
+			panic(err)
 		}
 
 		l.pos.column++
-		if unicode.IsLetter(r) {
-			lit = lit + string(r)
-		} else {
-			// scanned something not in the identifier
+
+		if r == '"' && len(lit) >= 1 {
 			l.backup()
 			return lit
+		} else {
+			if r != '"' {
+				lit += string(r)
+			}
 		}
 	}
+	return ""
 }
 
 func main() {
@@ -192,7 +235,6 @@ func main() {
 		if tok == EOF {
 			break
 		}
-
 		fmt.Printf("%d:%d\t%s\t%s\n", pos.line, pos.column, tok, lit)
 	}
 }
